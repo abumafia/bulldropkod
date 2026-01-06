@@ -1,9 +1,8 @@
-import { Telegraf, Markup } from 'telegraf';
-import express from 'express';
-import mongoose from 'mongoose';
-import dotenv from 'dotenv';
-
+const { Telegraf, Markup } = require('telegraf');
+const express = require('express');
+const dotenv = require('dotenv');
 dotenv.config();
+
 
 // Express server yaratish
 const app = express();

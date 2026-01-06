@@ -1,21 +1,45 @@
+require('dotenv').config();
+
 const { Telegraf, Markup } = require('telegraf');
 const express = require('express');
-const dotenv = require('dotenv');
-dotenv.config();
+const mongoose = require('mongoose'); // <-- Muhim: mongoose import qilindi!
 
-// Express server yaratish
 const app = express();
 const PORT = process.env.PORT || 3000;
-const WEBHOOK_URL = process.env.WEBHOOK_URL || 'https://bulldropkod.onrender.com';
+
+// .env faylda quyidagilar bo'lishi KERAK:
+// BOT_TOKEN=8574427558:AAGjdX1vgQijYKDv-UncC2BJN4OU2_MPLRg
+// MONGO_URI=mongodb+srv://abumafia0:abumafia0@abumafia.h1trttg.mongodb.net/bdbot?retryWrites=true&w=majority
+// WEBHOOK_URL=https://bulldropkod.onrender.com
+
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const MONGO_URI = process.env.MONGO_URI;
+const WEBHOOK_URL = process.env.WEBHOOK_URL?.replace(/\/$/, ''); // oxirgi / ni olib tashlaydi
+
+if (!BOT_TOKEN) {
+  console.error('❌ BOT_TOKEN .env faylda yo‘q!');
+  process.exit(1);
+}
+if (!MONGO_URI) {
+  console.error('❌ MONGO_URI .env faylda yo‘q!');
+  process.exit(1);
+}
+if (!WEBHOOK_URL) {
+  console.error('❌ WEBHOOK_URL .env faylda yo‘q! Render URL ni kiriting.');
+  process.exit(1);
+}
 
 // MongoDB ulanish
-mongoose.connect('mongodb+srv://abumafia0:abumafia0@abumafia.h1trttg.mongodb.net/bdbot?appName=abumafia')
-.then(() => console.log('✅ MongoDB ga ulandi'))
-.catch(err => console.error('❌ MongoDB ulanmadi:', err));
+mongoose.connect(MONGO_URI)
+  .then(() => console.log('✅ MongoDB ga ulandi'))
+  .catch(err => {
+    console.error('❌ MongoDB ulanmadi:', err);
+    process.exit(1);
+  });
 
 // Schemalar
 const UserSchema = new mongoose.Schema({
-  userId: { type: Number, unique: true },
+  userId: { type: Number, unique: true, required: true },
   username: String,
   firstName: String,
   lastName: String,
@@ -28,7 +52,7 @@ const UserSchema = new mongoose.Schema({
 });
 
 const PromoCodeSchema = new mongoose.Schema({
-  code: { type: String, unique: true, uppercase: true },
+  code: { type: String, unique: true, required: true },
   addedBy: Number,
   addedAt: { type: Date, default: Date.now },
   isActive: { type: Boolean, default: true }
@@ -37,13 +61,13 @@ const PromoCodeSchema = new mongoose.Schema({
 const User = mongoose.model('User', UserSchema);
 const PromoCode = mongoose.model('PromoCode', PromoCodeSchema);
 
-// Bot yaratish - polling rejimida
-const bot = new Telegraf('8574427558:AAGjdX1vgQijYKDv-UncC2BJN4OU2_MPLRg');
+// Bot yaratish
+const bot = new Telegraf(BOT_TOKEN);
 
-// Admin ID larni o'zingiznikiga almashtiring
+// Admin ID
 const ADMIN_IDS = [6606638731];
 
-// Keyboard menular
+// Keyboardlar
 const mainKeyboard = Markup.keyboard([
   ['🎁 Kundalik promokod', '👥 Referal havolam'],
   ['📜 Mening promokodlarim', '📊 Statistika']
@@ -55,12 +79,11 @@ const adminKeyboard = Markup.keyboard([
   ['📊 Bot statistikasi', '🔙 Asosiy menyu']
 ]).resize();
 
-// Referal kod generator
+// Funksiyalar
 function generateReferralCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-// Promokod generator
 function generatePromoCode() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let code = '';
@@ -70,7 +93,6 @@ function generatePromoCode() {
   return code;
 }
 
-// User yaratish/kontrol qilish
 async function getOrCreateUser(userId, userData) {
   let user = await User.findOne({ userId });
   if (!user) {
@@ -86,525 +108,281 @@ async function getOrCreateUser(userId, userData) {
   return user;
 }
 
-// ================== SIMPLE STATE MANAGEMENT ==================
+// State management
 const userStates = {};
 
-// START komandasi
+// ================== BOT HANDLERLARI ==================
+
 bot.start(async (ctx) => {
-  console.log('Start command received from:', ctx.from.id);
-  
+  console.log('Start command:', ctx.from.id);
   const userId = ctx.from.id;
   const user = await getOrCreateUser(userId, ctx.from);
-  
+
   // Referal tekshirish
   const referralParam = ctx.startPayload;
   if (referralParam && referralParam.startsWith('ref_')) {
     const referrerCode = referralParam.replace('ref_', '');
     const referrer = await User.findOne({ referralCode: referrerCode });
-    
+
     if (referrer && referrer.userId !== userId && !user.referredBy) {
       referrer.referrals += 1;
       await referrer.save();
-      
       user.referredBy = referrer.userId;
       await user.save();
-      
-      await ctx.reply(`✅ Siz ${referrer.firstName || referrer.username} tomonidan taklif qilindingiz!\n🎁 Endi sizda qo'shimcha promokod olish imkoniyati bor!`);
+
+      await ctx.reply(`✅ Siz ${referrer.firstName || referrer.username} tomonidan taklif qilindingiz!\n🎁 Qo'shimcha imkoniyatlar ochildi!`);
     }
   }
-  
+
   if (ADMIN_IDS.includes(userId)) {
     await ctx.reply(
-      `👋 Admin xush kelibsiz, ${ctx.from.first_name}!\n` +
-      `🤖 Bulldrop Promokod Botiga xush kelibsiz!\n\n` +
-      `👇 Quyidagi admin panelidan foydalaning:`,
+      `👋 Admin xush kelibsiz, ${ctx.from.first_name}!\n🤖 Bulldrop Promokod Botiga xush kelibsiz!`,
       adminKeyboard
     );
   } else {
     await ctx.reply(
-      `👋 Salom ${ctx.from.first_name}!\n` +
-      `🎁 Bulldrop Promokod Botiga xush kelibsiz!\n\n` +
-      `📌 **Mening ma'lumotlarim:**\n` +
-      `👥 Referallar: ${user.referrals} ta\n` +
-      `🎁 Promokodlar: ${user.usedPromoCodes.length} ta\n\n` +
-      `👇 Quyidagi menyudan tanlang:`,
+      `👋 Salom ${ctx.from.first_name}!\n🎁 Bulldrop Promokod Botiga xush kelibsiz!\n\n` +
+      `📌 Ma'lumotlarim:\n👥 Referallar: ${user.referrals} ta\n🎁 Promokodlar: ${user.usedPromoCodes.length} ta\n\n` +
+      `👇 Menyudan tanlang:`,
       mainKeyboard
     );
   }
 });
 
-// ================== USER FUNCTIONS ==================
-
 // Kundalik promokod
 bot.hears('🎁 Kundalik promokod', async (ctx) => {
-  console.log('Kundalik promokod tugmasi bosildi:', ctx.from.id);
-  
   const userId = ctx.from.id;
   const user = await User.findOne({ userId });
-  
-  if (!user) {
-    return ctx.reply('❌ Iltimos, botni qayta ishga tushiring (/start)', mainKeyboard);
-  }
-  
+  if (!user) return ctx.reply('❌ /start buyrug\'ini bosing.', mainKeyboard);
+
   const now = new Date();
-  const lastPromo = user.lastPromoDate;
-  
-  // 24 soat kutish
-  if (lastPromo) {
-    const timeDiff = now - lastPromo;
-    const hoursDiff = timeDiff / (1000 * 60 * 60);
-    
+  if (user.lastPromoDate) {
+    const hoursDiff = (now - user.lastPromoDate) / (1000 * 60 * 60);
     if (hoursDiff < 24) {
       const hoursLeft = Math.ceil(24 - hoursDiff);
-      return ctx.reply(
-        `⏳ Keyingi promokod uchun ${hoursLeft} soat kutishingiz kerak!\n` +
-        `👥 Agar tezroq promokod olishni istasangiz, do'stlaringizni taklif qiling!`,
-        mainKeyboard
-      );
+      return ctx.reply(`⏳ ${hoursLeft} soat kutishingiz kerak!\n👥 Do'st taklif qilib tezroq oling!`, mainKeyboard);
     }
   }
-  
-  // Promokod olish
-  const availablePromo = await PromoCode.findOne({ isActive: true });
-  
+
+  const availablePromo = await PromoCode.findOneAndDelete({ isActive: true });
   if (!availablePromo) {
-    return ctx.reply(
-      '❌ Hozirda promokodlar tugadi.\n' +
-      '📢 Tez orada yangi promokodlar qo\'shiladi!',
-      mainKeyboard
-    );
+    return ctx.reply('❌ Promokodlar tugadi.\n📢 Tez orada yangi kodlar qo\'shiladi!', mainKeyboard);
   }
-  
-  // Promokodni berish va yangilash
+
   user.lastPromoDate = now;
   user.usedPromoCodes.push(availablePromo.code);
   await user.save();
-  
-  // Promokodni o'chirish
-  await PromoCode.findByIdAndDelete(availablePromo._id);
-  
+
   await ctx.reply(
-    `🎉 **TABRIKLAYMIZ!**\n\n` +
-    `🔑 **Promokodingiz:** \`${availablePromo.code}\`\n\n` +
-    `📝 **Eslatma:** Ushbu promokod faqat bir marta ishlatilishi mumkin!\n` +
-    `⏳ **Keyingi promokod:** 24 soatdan keyin\n` +
-    `👥 **Qo'shimcha promokod:** Har bir taklif qilingan do'st uchun`,
-    { parse_mode: 'Markdown', ...mainKeyboard }
+    `🎉 **TABRIKLAYMIZ!**\n\n🔑 **Promokodingiz:** \`${availablePromo.code}\`\n\n` +
+    `📝 Bir marta ishlatiladi!\n⏳ Keyingi: 24 soatdan keyin\n👥 Referal orqali qo‘shimcha oling!`,
+    { parse_mode: 'Markdown', reply_markup: mainKeyboard.reply_markup }
   );
 });
 
 // Referal havola
 bot.hears('👥 Referal havolam', async (ctx) => {
-  console.log('Referal havolam tugmasi bosildi:', ctx.from.id);
-  
-  const userId = ctx.from.id;
-  const user = await User.findOne({ userId });
-  
-  if (!user) {
-    return ctx.reply('❌ Iltimos, botni qayta ishga tushiring (/start)', mainKeyboard);
-  }
-  
-  const referralLink = `https://t.me/${ctx.botInfo.username}?start=ref_${user.referralCode}`;
-  const shareText = `🎁 *Bulldrop Promokod Boti*\n\nHar kuni bepul promokodlar oling!\n👇 Quyidagi havola orqali kirish:`;
+  const user = await User.findOne({ userId: ctx.from.id });
+  if (!user) return ctx.reply('❌ /start buyrug\'ini bosing.', mainKeyboard);
+
+  const botUsername = (await bot.telegram.getMe()).username;
+  const referralLink = `https://t.me/${botUsername}?start=ref_${user.referralCode}`;
+  const shareText = `🎁 *Bulldrop Promokod Boti*\n\nHar kuni bepul promokod oling!\n👇 Kirish:`;
   const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(shareText)}`;
-  
+
   await ctx.reply(
-    `👥 **Referal havolangiz:**\n\n` +
-    `${referralLink}\n\n` +
-    `📊 **Statistika:**\n` +
-    `✅ Taklif qilingan do'stlar: ${user.referrals} ta\n` +
-    `🎁 Qo'shimcha promokodlar: ${user.referrals} ta\n\n` +
-    `📌 **Qoidalar:**\n` +
-    `• Har bir do'stingiz botga kirganda, sizga 1 ta qo'shimcha promokod beriladi\n` +
-    `• Taklif qilingan do'st ham shu tizimdan foydalana oladi`,
-    Markup.inlineKeyboard([
-      Markup.button.url('📲 Ulashish', shareUrl)
-    ]).resize()
+    `👥 **Referal havolangiz:**\n\n${referralLink}\n\n` +
+    `📊 Statistika:\n✅ Takliflar: ${user.referrals} ta\n🎁 Qo'shimcha promokod: ${user.referrals} ta\n\n` +
+    `📌 Har taklif uchun 1 ta qo‘shimcha promokod!`,
+    Markup.inlineKeyboard([Markup.button.url('📲 Ulashish', shareUrl)])
   );
 });
 
 // Mening promokodlarim
 bot.hears('📜 Mening promokodlarim', async (ctx) => {
-  console.log('Mening promokodlarim tugmasi bosildi:', ctx.from.id);
-  
-  const userId = ctx.from.id;
-  const user = await User.findOne({ userId });
-  
-  if (!user) {
-    return ctx.reply('❌ Iltimos, botni qayta ishga tushiring (/start)', mainKeyboard);
-  }
-  
+  const user = await User.findOne({ userId: ctx.from.id });
+  if (!user) return ctx.reply('❌ /start buyrug\'ini bosing.', mainKeyboard);
+
   if (user.usedPromoCodes.length === 0) {
-    return ctx.reply(
-      '📭 Hozircha sizda promokodlar mavjud emas.\n' +
-      '🎁 Birinchi promokodingizni olish uchun "Kundalik promokod" tugmasini bosing!',
-      mainKeyboard
-    );
+    return ctx.reply('📭 Hozircha promokod yo‘q.\n🎁 "Kundalik promokod" ni bosing!', mainKeyboard);
   }
-  
+
   const promos = user.usedPromoCodes.slice(-10).reverse();
-  let message = `📜 **Sizning oxirgi ${promos.length} ta promokodingiz:**\n\n`;
-  
-  promos.forEach((code, index) => {
-    message += `${index + 1}. \`${code}\`\n`;
-  });
-  
-  message += `\n🎁 Jami: ${user.usedPromoCodes.length} ta promokod`;
-  
-  await ctx.reply(message, { parse_mode: 'Markdown', ...mainKeyboard });
+  let message = `📜 **Oxirgi ${promos.length} ta promokodingiz:**\n\n`;
+  promos.forEach((code, i) => message += `${i + 1}. \`${code}\`\n`);
+  message += `\n🎁 Jami: ${user.usedPromoCodes.length} ta`;
+
+  await ctx.reply(message, { parse_mode: 'Markdown', reply_markup: mainKeyboard.reply_markup });
 });
 
 // Statistika
 bot.hears('📊 Statistika', async (ctx) => {
-  console.log('Statistika tugmasi bosildi:', ctx.from.id);
-  
-  const userId = ctx.from.id;
-  const user = await User.findOne({ userId });
-  
-  if (!user) {
-    return ctx.reply('❌ Iltimos, botni qayta ishga tushiring (/start)', mainKeyboard);
-  }
-  
+  const user = await User.findOne({ userId: ctx.from.id });
+  if (!user) return ctx.reply('❌ /start buyrug\'ini bosing.', mainKeyboard);
+
   const now = new Date();
   let nextPromoTime = "Hozir olish mumkin";
-  
   if (user.lastPromoDate) {
-    const nextAvailable = new Date(user.lastPromoDate.getTime() + 24 * 60 * 60 * 1000);
-    if (nextAvailable > now) {
-      const hoursLeft = Math.ceil((nextAvailable - now) / (1000 * 60 * 60));
-      nextPromoTime = `${hoursLeft} soatdan keyin`;
+    const next = new Date(user.lastPromoDate.getTime() + 24 * 3600000);
+    if (next > now) {
+      const hours = Math.ceil((next - now) / 3600000);
+      nextPromoTime = `${hours} soatdan keyin`;
     }
   }
-  
+
   const totalUsers = await User.countDocuments();
-  const activePromos = await PromoCode.countDocuments();
-  
+  const activePromos = await PromoCode.countDocuments({ isActive: true });
+
   await ctx.reply(
     `📊 **SIZNING STATISTIKANGIZ**\n\n` +
-    `👤 Ism: ${user.firstName || 'Foydalanuvchi'}\n` +
+    `👤 Ism: ${user.firstName || 'Noma\'lum'}\n` +
     `👥 Referallar: ${user.referrals} ta\n` +
     `🎁 Olingan promokodlar: ${user.usedPromoCodes.length} ta\n` +
     `⏳ Keyingi promokod: ${nextPromoTime}\n\n` +
-    `📈 **UMUMIY STATISTIKA**\n` +
+    `📈 **UMUMIY**\n` +
     `👥 Jami foydalanuvchilar: ${totalUsers} ta\n` +
     `🎁 Mavjud promokodlar: ${activePromos} ta`,
     mainKeyboard
   );
 });
 
-// ================== ADMIN FUNCTIONS ==================
+// ================== ADMIN PANEL ==================
 
-// Admin menyu
 bot.hears('🔙 Asosiy menyu', async (ctx) => {
-  console.log('Admin menyu tugmasi bosildi:', ctx.from.id);
-  
-  if (!ADMIN_IDS.includes(ctx.from.id)) {
-    return ctx.reply('❌ Bu menyu faqat adminlar uchun!', mainKeyboard);
-  }
-  
-  // State tozalash
+  if (!ADMIN_IDS.includes(ctx.from.id)) return ctx.reply('❌ Faqat admin!', mainKeyboard);
   delete userStates[ctx.from.id];
-  
-  await ctx.reply('👇 Admin menyusi:', adminKeyboard);
+  await ctx.reply('👇 Admin panel:', adminKeyboard);
 });
 
-// Promokod qo'shish
 bot.hears('➕ Promokod qo\'shish', async (ctx) => {
-  console.log('Promokod qoshish tugmasi bosildi:', ctx.from.id);
-  
-  if (!ADMIN_IDS.includes(ctx.from.id)) {
-    return ctx.reply('❌ Bu menyu faqat adminlar uchun!', mainKeyboard);
-  }
-  
-  // State o'rnatish
+  if (!ADMIN_IDS.includes(ctx.from.id)) return ctx.reply('❌ Faqat admin!', mainKeyboard);
   userStates[ctx.from.id] = { addingPromo: true };
-  
   await ctx.reply(
-    '📝 Yangi promokod qo\'shish:\n\n' +
-    '📌 Avtomatik generatsiya qilish uchun "auto" yozing\n' +
-    '📌 O\'zingiz kiritmoqchi bo\'lsangiz, promokodni yozing (6-20 belgi)\n\n' +
-    '❌ Bekor qilish uchun "cancel" yozing',
-    Markup.keyboard([
-      ['auto'],
-      ['cancel']
-    ]).resize()
+    '📝 Promokod qo‘shish:\n\n"auto" — avto generatsiya\nYoki o‘zingiz yozing (6-20 belgi)\n\n"cancel" — bekor qilish',
+    Markup.keyboard([['auto'], ['cancel']]).resize()
   );
 });
 
-// Promokod o'chirish
 bot.hears('🗑️ Promokod o\'chirish', async (ctx) => {
-  console.log('Promokod ochirish tugmasi bosildi:', ctx.from.id);
-  
-  if (!ADMIN_IDS.includes(ctx.from.id)) {
-    return ctx.reply('❌ Bu menyu faqat adminlar uchun!', mainKeyboard);
-  }
-  
-  // State tozalash
-  delete userStates[ctx.from.id];
-  
-  const promoCodes = await PromoCode.find({ isActive: true }).limit(50);
-  
-  if (promoCodes.length === 0) {
-    return ctx.reply('📭 O\'chirish uchun promokodlar mavjud emas!', adminKeyboard);
-  }
-  
-  let message = '🗑️ **O\'chirish uchun promokodlar:**\n\n';
+  if (!ADMIN_IDS.includes(ctx.from.id)) return ctx.reply('❌ Faqat admin!', mainKeyboard);
+  const promos = await PromoCode.find({ isActive: true }).limit(50);
+  if (promos.length === 0) return ctx.reply('📭 O‘chirish uchun kod yo‘q!', adminKeyboard);
+
+  let msg = '🗑️ **O‘chirish uchun tanlang:**\n\n';
   const buttons = [];
-  
-  promoCodes.forEach((promo, index) => {
-    message += `${index + 1}. \`${promo.code}\`\n`;
-    buttons.push([Markup.button.callback(promo.code, `delete_${promo.code}`)]);
+  promos.forEach((p, i) => {
+    msg += `${i + 1}. \`${p.code}\`\n`;
+    buttons.push([Markup.button.callback(p.code, `delete_${p.code}`)]);
   });
-  
   buttons.push([Markup.button.callback('❌ Bekor qilish', 'cancel_delete')]);
-  
-  await ctx.reply(
-    message + '\n👇 O\'chirmoqchi bo\'lgan promokodingizni tanlang:',
-    {
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard(buttons)
-    }
-  );
+
+  await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: { inline_keyboard: buttons } });
 });
 
-// Barcha promokodlar
 bot.hears('📋 Barcha promokodlar', async (ctx) => {
-  console.log('Barcha promokodlar tugmasi bosildi:', ctx.from.id);
-  
-  if (!ADMIN_IDS.includes(ctx.from.id)) {
-    return ctx.reply('❌ Bu menyu faqat adminlar uchun!', mainKeyboard);
-  }
-  
-  // State tozalash
-  delete userStates[ctx.from.id];
-  
-  const promoCodes = await PromoCode.find({ isActive: true }).sort({ addedAt: -1 });
-  const totalCodes = promoCodes.length;
-  
-  if (totalCodes === 0) {
-    return ctx.reply('📭 Hozirda faol promokodlar mavjud emas!', adminKeyboard);
-  }
-  
-  let message = `📋 **Faol promokodlar (${totalCodes} ta):**\n\n`;
-  
-  promoCodes.forEach((promo, index) => {
-    const date = new Date(promo.addedAt).toLocaleDateString();
-    message += `${index + 1}. \`${promo.code}\` - 📅 ${date}\n`;
+  if (!ADMIN_IDS.includes(ctx.from.id)) return ctx.reply('❌ Faqat admin!', mainKeyboard);
+  const promos = await PromoCode.find({ isActive: true }).sort({ addedAt: -1 });
+  if (promos.length === 0) return ctx.reply('📭 Faol promokod yo‘q!', adminKeyboard);
+
+  let msg = `📋 **Faol promokodlar (${promos.length} ta):**\n\n`;
+  promos.forEach((p, i) => {
+    const date = new Date(p.addedAt).toLocaleDateString();
+    msg += `${i + 1}. \`${p.code}\` — ${date}\n`;
   });
-  
-  await ctx.reply(message, { parse_mode: 'Markdown', ...adminKeyboard });
+  await ctx.reply(msg, { parse_mode: 'Markdown', reply_markup: adminKeyboard.reply_markup });
 });
 
-// Foydalanuvchilar
 bot.hears('👥 Foydalanuvchilar', async (ctx) => {
-  console.log('Foydalanuvchilar tugmasi bosildi:', ctx.from.id);
-  
-  if (!ADMIN_IDS.includes(ctx.from.id)) {
-    return ctx.reply('❌ Bu menyu faqat adminlar uchun!', mainKeyboard);
-  }
-  
-  // State tozalash
-  delete userStates[ctx.from.id];
-  
-  const totalUsers = await User.countDocuments();
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const newUsersToday = await User.countDocuments({ createdAt: { $gte: today } });
-  
-  const topReferrers = await User.find().sort({ referrals: -1 }).limit(10);
-  
-  let message = `👥 **Foydalanuvchilar statistikasi**\n\n` +
-    `📊 Jami foydalanuvchilar: ${totalUsers} ta\n` +
-    `🆕 Bugun qo'shilgan: ${newUsersToday} ta\n\n` +
-    `🏆 **TOP 10 Referallar:**\n`;
-  
-  topReferrers.forEach((user, index) => {
-    const name = user.firstName || user.username || `ID: ${user.userId}`;
-    message += `${index + 1}. ${name} - ${user.referrals} ta referal\n`;
+  if (!ADMIN_IDS.includes(ctx.from.id)) return ctx.reply('❌ Faqat admin!', mainKeyboard);
+  const total = await User.countDocuments();
+  const today = new Date(); today.setHours(0,0,0,0);
+  const newToday = await User.countDocuments({ createdAt: { $gte: today } });
+  const top = await User.find().sort({ referrals: -1 }).limit(10);
+
+  let msg = `👥 **Foydalanuvchilar**\n\n📊 Jami: ${total} ta\n🆕 Bugun: ${newToday} ta\n\n🏆 **TOP 10 Referal**\n`;
+  top.forEach((u, i) => {
+    const name = u.firstName || u.username || `ID: ${u.userId}`;
+    msg += `${i + 1}. ${name} — ${u.referrals} ta\n`;
   });
-  
-  await ctx.reply(message, adminKeyboard);
+  await ctx.reply(msg, adminKeyboard);
 });
 
-// Bot statistikasi
 bot.hears('📊 Bot statistikasi', async (ctx) => {
-  console.log('Bot statistikasi tugmasi bosildi:', ctx.from.id);
-  
-  if (!ADMIN_IDS.includes(ctx.from.id)) {
-    return ctx.reply('❌ Bu menyu faqat adminlar uchun!', mainKeyboard);
-  }
-  
-  // State tozalash
-  delete userStates[ctx.from.id];
-  
-  const [
-    totalUsers,
-    activePromos,
-    totalPromosAdded,
-    todayUsers
-  ] = await Promise.all([
+  if (!ADMIN_IDS.includes(ctx.from.id)) return ctx.reply('❌ Faqat admin!', mainKeyboard);
+  const [totalUsers, activePromos, totalAdded, todayUsers] = await Promise.all([
     User.countDocuments(),
     PromoCode.countDocuments({ isActive: true }),
     PromoCode.countDocuments(),
-    User.countDocuments({ 
-      createdAt: { $gte: new Date(new Date().setHours(0, 0, 0, 0)) } 
-    })
+    User.countDocuments({ createdAt: { $gte: new Date(new Date().setHours(0,0,0,0)) } })
   ]);
-  
-  const avgPromosPerUser = totalUsers > 0 
-    ? (totalPromosAdded / totalUsers).toFixed(2)
-    : 0;
-  
+
+  const avg = totalUsers > 0 ? (totalAdded / totalUsers).toFixed(2) : 0;
+
   await ctx.reply(
     `📊 **BOT STATISTIKASI**\n\n` +
-    `👥 Foydalanuvchilar:\n` +
-    `   • Jami: ${totalUsers} ta\n` +
-    `   • Bugun: ${todayUsers} ta\n\n` +
-    `🎁 Promokodlar:\n` +
-    `   • Mavjud: ${activePromos} ta\n` +
-    `   • Jami qo'shilgan: ${totalPromosAdded} ta\n` +
-    `   • O'rtacha: ${avgPromosPerUser} ta/foydalanuvchi\n\n` +
-    `📈 **O'rtacha ko'rsatkichlar**\n` +
-    `• Har 100 foydalanuvchiga ${totalUsers > 0 ? Math.round(activePromos / totalUsers * 100) : 0} ta promokod`,
+    `👥 Foydalanuvchilar:\n   • Jami: ${totalUsers}\n   • Bugun: ${todayUsers}\n\n` +
+    `🎁 Promokodlar:\n   • Mavjud: ${activePromos}\n   • Jami qo‘shilgan: ${totalAdded}\n   • O‘rtacha: ${avg}/foydalanuvchi`,
     adminKeyboard
   );
 });
 
-// ================== PROMOKOD QO'SHISH UCHUN TEXT HANDLER ==================
+// Text handler — promokod qo‘shish
 bot.on('text', async (ctx) => {
   const userId = ctx.from.id;
-  const text = ctx.message.text;
-  
-  console.log('Text message from:', userId, 'text:', text);
-  
-  // Agar admin promokod qo'shish holatida bo'lsa
-  if (userStates[userId] && userStates[userId].addingPromo) {
+  const text = ctx.message.text.trim();
+
+  if (userStates[userId]?.addingPromo) {
     if (text.toLowerCase() === 'cancel') {
       delete userStates[userId];
-      await ctx.reply('❌ Promokod qo\'shish bekor qilindi.', adminKeyboard);
-      return;
+      return ctx.reply('❌ Bekor qilindi.', adminKeyboard);
     }
-    
-    let promoCode = text.toUpperCase();
-    
-    if (text.toLowerCase() === 'auto') {
-      promoCode = generatePromoCode();
+
+    let code = text.toUpperCase();
+    if (text.toLowerCase() === 'auto') code = generatePromoCode();
+
+    if (!code.match(/^[A-Z0-9]{6,20}$/)) {
+      return ctx.reply('❌ Faqat katta harf va raqam (6-20 belgi)!\nQayta yozing yoki "cancel"', Markup.keyboard([['auto'], ['cancel']]).resize());
     }
-    
-    // Promokod formatini tekshirish
-    if (!promoCode.match(/^[A-Z0-9]{6,20}$/)) {
-      await ctx.reply(
-        '❌ Noto\'g\'ri format!\n' +
-        '✅ Promokod faqat katta harflar va raqamlardan iborat bo\'lishi kerak (6-20 belgi)\n' +
-        'Qayta kiriting yoki "cancel" deb yozing:',
-        Markup.keyboard([
-          ['auto'],
-          ['cancel']
-        ]).resize()
-      );
-      return;
-    }
-    
+
     try {
-      const newPromo = new PromoCode({
-        code: promoCode,
-        addedBy: ctx.from.id
-      });
-      await newPromo.save();
-      
-      // State tozalash
+      await new PromoCode({ code, addedBy: userId }).save();
       delete userStates[userId];
-      
-      await ctx.reply(
-        `✅ Promokod muvaffaqiyatli qo'shildi!\n\n` +
-        `🔑 Kod: \`${promoCode}\`\n` +
-        `👤 Qo'shgan: ${ctx.from.first_name}\n` +
-        `📅 Sana: ${new Date().toLocaleString()}`,
-        { parse_mode: 'Markdown', ...adminKeyboard }
-      );
-    } catch (error) {
-      await ctx.reply(
-        '❌ Xatolik: Bu promokod allaqachon mavjud!\n' +
-        'Boshqa kod kiriting yoki "cancel" deb yozing:',
-        Markup.keyboard([
-          ['auto'],
-          ['cancel']
-        ]).resize()
-      );
+      await ctx.reply(`✅ \`${code}\` muvaffaqiyatli qo‘shildi!`, { parse_mode: 'Markdown', reply_markup: adminKeyboard.reply_markup });
+    } catch (err) {
+      await ctx.reply('❌ Bu kod allaqachon mavjud!\nBoshqa kiriting yoki "cancel"', Markup.keyboard([['auto'], ['cancel']]).resize());
     }
     return;
   }
-  
-  // Agar boshqa text bo'lsa, oddiy foydalanuvchiga javob berish
+
   if (!ADMIN_IDS.includes(userId)) {
-    await ctx.reply(
-      '🤖 Men faqat quyidagi tugmalar orqali ishlayman:\n' +
-      '👇 Pastdagi menyudan tanlang:',
-      mainKeyboard
-    );
+    await ctx.reply('👇 Faqat tugmalar orqali ishlayman.', mainKeyboard);
   }
 });
 
-// ================== CALLBACK HANDLERS ==================
-
-bot.start((ctx) => {
-  console.log('START ISHLADI:', ctx.from.id);
-  ctx.reply('✅ Bot ishlayapti');
-});
-
-// Promokod o'chirish callback
+// Callback — promokod o‘chirish
 bot.action(/delete_(.+)/, async (ctx) => {
-  console.log('Delete callback:', ctx.match[1]);
-  
-  if (!ADMIN_IDS.includes(ctx.from.id)) {
-    return ctx.answerCbQuery('❌ Ruxsat yo\'q!');
-  }
-  
-  const promoCode = ctx.match[1];
-  
-  try {
-    const deleted = await PromoCode.findOneAndDelete({ code: promoCode });
-    
-    if (deleted) {
-      await ctx.editMessageText(
-        `✅ Promokod muvaffaqiyatli o'chirildi!\n\n` +
-        `🗑️ O'chirildi: \`${promoCode}\`\n` +
-        `👤 O'chirgan: ${ctx.from.first_name}\n` +
-        `📅 Vaqt: ${new Date().toLocaleString()}`,
-        { parse_mode: 'Markdown' }
-      );
-    } else {
-      await ctx.answerCbQuery('❌ Promokod topilmadi!');
-    }
-  } catch (error) {
-    await ctx.answerCbQuery('❌ Xatolik yuz berdi!');
+  if (!ADMIN_IDS.includes(ctx.from.id)) return ctx.answerCbQuery('❌ Ruxsat yo‘q');
+  const code = ctx.match[1];
+  const deleted = await PromoCode.findOneAndDelete({ code });
+  if (deleted) {
+    await ctx.editMessageText(`✅ \`${code}\` o‘chirildi!\n👤 ${ctx.from.first_name}\n📅 ${new Date().toLocaleString()}`, { parse_mode: 'Markdown' });
+  } else {
+    await ctx.answerCbQuery('❌ Kod topilmadi');
   }
 });
 
-// O'chirishni bekor qilish
 bot.action('cancel_delete', async (ctx) => {
   await ctx.deleteMessage();
-  await ctx.answerCbQuery('❌ O\'chirish bekor qilindi');
+  await ctx.answerCbQuery('❌ Bekor qilindi');
 });
 
-// ================== XATOLIKLARNI USHLASH ==================
-
+// Xatoliklar
 bot.catch((err, ctx) => {
-  console.error(`Bot xatosi [${ctx.updateType}]:`, err);
-  console.error('Update:', ctx.update);
-  
-  try {
-    if (ctx.message) {
-      ctx.reply('❌ Botda xatolik yuz berdi. Iltimos, keyinroq urinib ko\'ring.', mainKeyboard);
-    }
-  } catch (e) {
-    console.error('Javob berishda xatolik:', e);
-  }
+  console.error('Bot xatosi:', err);
+  ctx.reply?.('❌ Xatolik yuz berdi. Keyinroq urinib ko‘ring.');
 });
 
-// ================== WEB SERVER SETUP ==================
-
-// ================== EXPRESS SERVER VA WEBHOOK ==================
+// ================== SERVER VA WEBHOOK ==================
 
 app.use(express.json());
 
@@ -613,18 +391,21 @@ app.get('/', (req, res) => {
   res.json({ status: 'ok', bot: 'Bulldrop Promokod Bot', time: new Date().toISOString() });
 });
 
-// Webhook endpoint
-app.post('/webhook', bot.webhookCallback('/webhook')); // Telegrafning o'zi handle qiladi
+// Webhook
+app.post('/webhook', (req, res) => {
+  bot.handleUpdate(req.body);
+  res.status(200).send('OK');
+});
 
-// Serverni ishga tushirish
+// Server ishga tushirish
 app.listen(PORT, async () => {
-  console.log(`🚀 Server ${PORT} portda ishga tushdi`);
+  console.log(`🚀 Server ${PORT} portda ishlayapti`);
 
   const webhookPath = `${WEBHOOK_URL}/webhook`;
   try {
     await bot.telegram.setWebhook(webhookPath);
-    console.log(`✅ Webhook muvaffaqiyatli o'rnatildi: ${webhookPath}`);
+    console.log(`✅ Webhook o‘rnatildi: ${webhookPath}`);
   } catch (err) {
-    console.error('❌ Webhook o\'rnatishda xatolik:', err.message);
+    console.error('❌ Webhook xatosi:', err.message);
   }
 });

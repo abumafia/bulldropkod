@@ -40,9 +40,7 @@ const User = mongoose.model('User', UserSchema);
 const PromoCode = mongoose.model('PromoCode', PromoCodeSchema);
 
 // Bot yaratish - polling rejimida
-const bot = new Telegraf('8574427558:AAGjdX1vgQijYKDv-UncC2BJN4OU2_MPLRg', {
-  telegram: { webhookReply: false }
-});
+const bot = new Telegraf('8574427558:AAGjdX1vgQijYKDv-UncC2BJN4OU2_MPLRg');
 
 // Admin ID larni o'zingiznikiga almashtiring
 const ADMIN_IDS = [6606638731];
@@ -551,6 +549,11 @@ bot.on('text', async (ctx) => {
 
 // ================== CALLBACK HANDLERS ==================
 
+bot.start((ctx) => {
+  console.log('START ISHLADI:', ctx.from.id);
+  ctx.reply('✅ Bot ishlayapti');
+});
+
 // Promokod o'chirish callback
 bot.action(/delete_(.+)/, async (ctx) => {
   console.log('Delete callback:', ctx.match[1]);
@@ -632,9 +635,6 @@ app.get('/botinfo', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
-
-await bot.telegram.setWebhook(`${WEBHOOK_URL}/webhook`);
-console.log('✅ Webhook o‘rnatildi:', `${WEBHOOK_URL}/webhook`);
 
 app.post('/webhook', (req, res) => {
   try {

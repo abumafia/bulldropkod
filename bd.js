@@ -398,14 +398,8 @@ app.post('/webhook', (req, res) => {
 });
 
 // Server ishga tushirish
-app.listen(PORT, async () => {
-  console.log(`🚀 Server ${PORT} portda ishlayapti`);
-
-  const webhookPath = `${WEBHOOK_URL}/webhook`;
-  try {
-    await bot.telegram.setWebhook(webhookPath);
-    console.log(`✅ Webhook o‘rnatildi: ${webhookPath}`);
-  } catch (err) {
-    console.error('❌ Webhook xatosi:', err.message);
-  }
+// Server ishga tushirish
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server ${PORT} portda (0.0.0.0) ishga tushdi`);
+  console.log(`✅ Webhook domain: ${WEBHOOK_DOMAIN}`);
 });

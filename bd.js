@@ -1,3 +1,4 @@
+const dotenv = require('dotenv');
 const { Telegraf, Markup } = require('telegraf');
 const express = require('express');
 const mongoose = require('mongoose');

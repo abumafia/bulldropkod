@@ -8,7 +8,7 @@ const PORT = process.env.PORT || 3000;
 const WEBHOOK_URL = process.env.WEBHOOK_URL || '';
 
 // MongoDB ulanish
-mongoose.connect('mongodb+srv://abumafia0:abumafia0@abumafia.h1trttg.mongodb.net/st2bot?appName=abumafia')
+mongoose.connect('mongodb+srv://abumafia0:abumafia0@abumafia.h1trttg.mongodb.net/bdbot?appName=abumafia')
 .then(() => console.log('✅ MongoDB ga ulandi'))
 .catch(err => console.error('❌ MongoDB ulanmadi:', err));
 
@@ -37,7 +37,7 @@ const User = mongoose.model('User', UserSchema);
 const PromoCode = mongoose.model('PromoCode', PromoCodeSchema);
 
 // Bot yaratish - polling rejimida
-const bot = new Telegraf('7412314295:AAHYB804OToAPUQiC-b6Ma6doBtMCHETmQU', {
+const bot = new Telegraf('8574427558:AAGjdX1vgQijYKDv-UncC2BJN4OU2_MPLRg', {
   telegram: { webhookReply: false }
 });
 

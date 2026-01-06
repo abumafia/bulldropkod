@@ -604,55 +604,27 @@ bot.catch((err, ctx) => {
 
 // ================== WEB SERVER SETUP ==================
 
+// ================== EXPRESS SERVER VA WEBHOOK ==================
+
 app.use(express.json());
 
-// Health check endpoint
+// Health check
 app.get('/', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    service: 'Bulldrop Promokod Bot',
-    time: new Date().toISOString(),
-    version: '1.0.0'
-  });
+  res.json({ status: 'ok', bot: 'Bulldrop Promokod Bot', time: new Date().toISOString() });
 });
 
-// Bot ma'lumotlari
-app.get('/botinfo', async (req, res) => {
-  try {
-    const totalUsers = await User.countDocuments();
-    const activePromos = await PromoCode.countDocuments({ isActive: true });
-    
-    res.json({
-      status: 'running',
-      users: totalUsers,
-      activePromoCodes: activePromos,
-      uptime: process.uptime(),
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post('/webhook', (req, res) => {
-  try {
-    bot.handleUpdate(req.body);
-    res.sendStatus(200);
-  } catch (err) {
-    console.error('Webhook error:', err);
-    res.sendStatus(500);
-  }
-});
+// Webhook endpoint
+app.post('/webhook', bot.webhookCallback('/webhook')); // Telegrafning o'zi handle qiladi
 
 // Serverni ishga tushirish
-async function startServer() {
-  app.listen(PORT, async () => {
-    console.log(`🚀 Server ${PORT}-portda ishga tushdi`);
+app.listen(PORT, async () => {
+  console.log(`🚀 Server ${PORT} portda ishga tushdi`);
 
-    const WEBHOOK_URL = process.env.WEBHOOK_URL;
-    const webhook = `${WEBHOOK_URL}/webhook`;
-
-    await bot.telegram.setWebhook(webhook);
-    console.log('🤖 Webhook o‘rnatildi:', webhook);
-  });
-}
+  const webhookPath = `${WEBHOOK_URL}/webhook`;
+  try {
+    await bot.telegram.setWebhook(webhookPath);
+    console.log(`✅ Webhook muvaffaqiyatli o'rnatildi: ${webhookPath}`);
+  } catch (err) {
+    console.error('❌ Webhook o\'rnatishda xatolik:', err.message);
+  }
+});

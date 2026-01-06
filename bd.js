@@ -8,7 +8,7 @@ dotenv.config();
 // Express server yaratish
 const app = express();
 const PORT = process.env.PORT || 3000;
-const WEBHOOK_URL = process.env.WEBHOOK_URL || '';
+const WEBHOOK_URL = process.env.WEBHOOK_URL || 'https://bulldropkod.onrender.com';
 
 // MongoDB ulanish
 mongoose.connect('mongodb+srv://abumafia0:abumafia0@abumafia.h1trttg.mongodb.net/bdbot?appName=abumafia')
@@ -636,34 +636,25 @@ app.get('/botinfo', async (req, res) => {
 await bot.telegram.setWebhook(`${WEBHOOK_URL}/webhook`);
 console.log('✅ Webhook o‘rnatildi:', `${WEBHOOK_URL}/webhook`);
 
-
-// Webhook endpoint (agar kerak bo'lsa)
 app.post('/webhook', (req, res) => {
-  res.status(200).json({ status: 'webhook_not_used' });
+  try {
+    bot.handleUpdate(req.body);
+    res.sendStatus(200);
+  } catch (err) {
+    console.error('Webhook error:', err);
+    res.sendStatus(500);
+  }
 });
 
 // Serverni ishga tushirish
 async function startServer() {
-  const server = app.listen(PORT, async () => {
+  app.listen(PORT, async () => {
     console.log(`🚀 Server ${PORT}-portda ishga tushdi`);
 
     const WEBHOOK_URL = process.env.WEBHOOK_URL;
-    await bot.telegram.setWebhook(`${WEBHOOK_URL}/webhook`);
+    const webhook = `${WEBHOOK_URL}/webhook`;
 
-    console.log('🤖 Webhook ishlayapti:', `${WEBHOOK_URL}/webhook`);
+    await bot.telegram.setWebhook(webhook);
+    console.log('🤖 Webhook o‘rnatildi:', webhook);
   });
 }
-
-
-// Xatoliklarni ushlash
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('⚠️ Unhandled Rejection at:', promise, 'reason:', reason);
-});
-
-process.on('uncaughtException', (error) => {
-  console.error('⚠️ Uncaught Exception:', error);
-  console.error('Stack:', error.stack);
-});
-
-// Serverni ishga tushirish
-startServer();
